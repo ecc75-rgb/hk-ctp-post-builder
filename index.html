@@ -46,6 +46,13 @@ button.secondary{background:#2a3443;color:#e8eaf0;border:1px solid #475160;borde
 <div class="status" id="packStatus">Görseller henüz yüklenmedi. Sıralama aracı yine çalışır; fotoğraflar için paketi bir kez yüklemelisin.</div>
 </div>
 <div class="panel">
+<h3>Orijinal yazı tipleri (Mac)</h3>
+<p>Gönderdiğin Impact ve Tungsten fontlarını yalnızca bu tarayıcıya yükleyebilirsin. Font dosyaları GitHub deposuna gönderilmez.</p>
+<label class="file-label" for="fonts">↑ Impact / Tungsten yükle</label><input id="fonts" type="file" accept=".ttf,.otf,font/ttf,font/otf" multiple>
+<div class="status" id="fontStatus">Fontlar yüklenmedi. Yüklü değilse sistem benzer fontları kullanır.</div>
+<label for="nameFont">Aday isimleri fontu</label><select id="nameFont"><option value="HKImpact">Impact</option><option value="HKTungsten">Tungsten Bold</option></select>
+</div>
+<div class="panel">
 <div class="eyebrow">02 / ADAY HAVUZU</div><div class="flex"><h3 class="fill" id="poolTitle">Lefkoşa</h3><span class="count" id="count"></span></div>
 <div id="subArea" style="display:none"><label>İlçe seç</label><select id="sub"><option value="isk">İskele</option><option value="guz">Güzelyurt</option><option value="lefke">Lefke</option></select></div>
 <input id="search" type="search" placeholder="Aday ara..."><div class="pool" id="pool"></div>
@@ -75,6 +82,8 @@ lefke:"Mehmet Bicen|Münever Ebedi Çakmak|Salahi Şahiner"
 var districts={lef:["Lefkoşa",16],gir:["Girne",12],mag:["Gazimağusa",12],combined:["3 ilçe",10]};
 var captions={isk:"İSKELE",guz:"GÜZELYURT",lefke:"LEFKE"};
 var photos={},templates={},people={},selected={},active="lef",sub="isk",loaded=false,processing=false,drag=null;
+var fontReady={HKImpact:false,HKTungsten:false};
+var chosenFont=localStorage.getItem("HKCTP_nameFont")||"HKImpact";
 var c=document.getElementById('post'),ctx=c.getContext('2d',{alpha:false}),el=id=>document.getElementById(id);
 function norm(t){return String(t||"").toLocaleLowerCase("tr-TR").replace(/ı/g,"i").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"")}
 function slug(t){return norm(t).replace(/[^a-z0-9]+/g,"-")}
@@ -106,9 +115,12 @@ var x=a.x,y=a.y,w=a.w,h=a.h,b=a.bottom,p=person(selected[active][i]),ph=h-b,im=p
 rect(x,y,w,h,"#252934");rect(x,y,w,ph,"#565a61");if(im)drawCover(im,x,y,w,ph);else{ctx.fillStyle="#777c83";ctx.beginPath();ctx.arc(x+w/2,y+ph*.37,w*.14,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(x+w/2,y+ph*.96,w*.33,ph*.32,0,Math.PI,Math.PI*2);ctx.fill()}
 rect(x,y+ph,w,b,"#131317");rect(x+6,y+ph+2,w-12,b-4,"#ffcc00");
 ctx.fillStyle="#ffcc00";ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+54,y);ctx.lineTo(x+44,y+45);ctx.lineTo(x,y+48);ctx.closePath();ctx.fill();
-ctx.fillStyle="#101010";ctx.textBaseline="middle";ctx.textAlign="center";ctx.font="bold 34px Impact,Arial";ctx.fillText(String(a.n),x+22,y+21);
+ctx.fillStyle="#101010";ctx.textBaseline="middle";ctx.textAlign="center";ctx.font="bold 34px "+(fontReady.HKImpact?"HKImpact":"Impact")+",Arial";ctx.fillText(String(a.n),x+22,y+21);
 var name=p?p.name.toLocaleUpperCase("tr-TR"):"ADAY SEÇ";
-var font=25;ctx.font="bold "+font+"px Impact,Arial";while(ctx.measureText(name).width*.76>w-16&&font>12){font--;ctx.font="bold "+font+"px Impact,Arial"}
+var family=fontReady[chosenFont]?chosenFont:(fontReady.HKImpact?"HKImpact":"Impact");
+var font=chosenFont==="HKTungsten"?34:25;
+ctx.font="bold "+font+"px "+family+",Impact,Arial";
+while(ctx.measureText(name).width*.76>w-16&&font>12){font--;ctx.font="bold "+font+"px "+family+",Impact,Arial"}
 ctx.save();ctx.translate(x+w/2,y+ph+b/2+2);ctx.scale(.76,1);ctx.fillText(name,0,0,(w-12)/.76);ctx.restore();
 });
 }
@@ -191,8 +203,37 @@ if(persist)await remember(blob);render();
 }catch(err){el("packStatus").textContent="Yükleme hatası: "+err.message;console.error(err)}
 finally{processing=false}
 }
+async function applyFontBuffer(buffer,family){
+  var font=new FontFace(family,buffer,{style:"normal",weight:"bold"});
+  await font.load();document.fonts.add(font);fontReady[family]=true;
+  el("fontStatus").innerHTML="<span class='green'>✓ Yerel fontlar: "+Object.keys(fontReady).filter(x=>fontReady[x]).map(x=>x==="HKImpact"?"Impact":"Tungsten").join(" + ")+"</span>";
+  draw();
+}
+async function saveFont(buffer,family){
+  try{var d=await db();await new Promise((res,rej)=>{var tx=d.transaction("files","readwrite");tx.objectStore("files").put(buffer,"font-"+family);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});d.close()}
+  catch(err){el("fontStatus").textContent="Font yüklenmiş ancak kalıcı saklanamamış olabilir."}
+}
+async function restoreFonts(){
+  try{var d=await db();
+    for(var family of ["HKImpact","HKTungsten"]){
+      var buff=await new Promise((res,rej)=>{var tx=d.transaction("files","readonly");var r=tx.objectStore("files").get("font-"+family);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
+      if(buff)await applyFontBuffer(buff,family);
+    }
+    d.close()
+  }catch(err){console.warn(err)}
+}
+el("fonts").onchange=async e=>{
+  for(var file of e.target.files){
+    var family=/tungsten/i.test(file.name)?"HKTungsten":/impact/i.test(file.name)?"HKImpact":null;
+    if(!family){alert("Yalnızca Impact ve Tungsten fontlarını yükle.");continue}
+    try{var buff=await file.arrayBuffer();await applyFontBuffer(buff,family);await saveFont(buff,family)}
+    catch(err){el("fontStatus").textContent="Font yükleme hatası: "+err.message}
+  }
+};
+el("nameFont").value=chosenFont;
+el("nameFont").onchange=e=>{chosenFont=e.target.value;localStorage.setItem("HKCTP_nameFont",chosenFont);draw()};
 el("file").onchange=e=>{if(e.target.files[0])loadPack(e.target.files[0],true)};
-render();restore();
+render();restore();restoreFonts();
 })();
 </script>
 </body></html>
